@@ -177,6 +177,83 @@ Walking 4 levels of page tables for every access would be slow. The CPU caches r
 
 ---
 
+## 5. Detailed Explanations
+
+### 5.1 Virtual Address Space (User Space)
+
+Every process sees its own **virtual address space** — a private view of memory that doesn't correspond 1:1 to physical RAM. The kernel and MMU make this illusion work.
+
+| Region | Purpose |
+| ------ | ------- |
+| **Stack** | Holds function call frames, local variables, and return addresses. Grows downward. Each thread has its own stack. |
+| **mmap region** | Shared libraries (e.g. `libc`) and memory-mapped files (`mmap`). Used for shared code and file-backed memory. |
+| **Heap** | Dynamic allocations via `malloc`, `new`, etc. Grows upward. Managed by allocators like `ptmalloc`. |
+| **Data + BSS** | *Data*: initialized globals and statics. *BSS*: uninitialized globals/statics (zeroed at load time). |
+| **Code (.text)** | Executable instructions. Read-only. Can be shared across processes running the same binary. |
+
+A process cannot access kernel memory or hardware directly. It must use **system calls** (`read`, `write`, `open`, `mmap`, etc.), which switch the CPU to kernel mode and execute privileged code.
+
+### 5.2 Process Descriptor (`task_struct`)
+
+The kernel represents every process with a **`task_struct`** in kernel memory. It is the central record for that process.
+
+- **PID, state, CPU registers**: Identity, run state (running, sleeping, stopped, etc.), and saved registers for context switching.
+- **Scheduling info**: Priority, policy, CPU affinity, etc.
+- **Credentials (UID/GID)**: User and group IDs used for access control.
+- **Parent/child links**: Pointers for the process tree (`fork`, `exec`, `wait`).
+- **Pointers to subsystems**: `mm_struct` (memory), `files_struct` (open files), signal handling, etc.
+
+The `task_struct` is the entry point the kernel uses to find everything it needs for a process.
+
+### 5.3 Memory Management (`mm_struct` and VMAs)
+
+**`mm_struct`** holds the process address space:
+
+- **Page table root (CR3 / PGD)**: Pointer to the top-level page table. On context switch, the kernel loads this into the CPU so the MMU uses this process's mappings.
+- **List of VMAs**: All virtual memory regions for the process.
+
+**`vm_area_struct`** (Virtual Memory Area) describes one contiguous virtual region:
+
+- **Start/end addresses**: The virtual range.
+- **Permissions (R/W/X)**: Read, write, execute — enforced by the MMU.
+- **Backing**: Anonymous (e.g. heap, stack) or file-backed (e.g. mapped file). For file-backed regions, it also tracks file offset and inode info.
+
+**Physical memory** holds actual data in frames — stack pages, heap pages, file-backed pages (e.g. from `mmap`), and code pages.
+
+When RAM is full, the kernel may move pages to **swap** on disk. The PTE is updated to "not present" and points to a swap slot. On access, a page fault occurs and the kernel brings the page back into RAM.
+
+### 5.4 File Management (`files_struct`, `struct file`, inode)
+
+**`files_struct`** contains the per-process **file descriptor table**:
+
+- FD 0 → stdin, FD 1 → stdout, FD 2 → stderr
+- FD 3+ → files, sockets, pipes, etc. opened by the process
+
+`open()` returns a new FD; `read()`, `write()`, etc. use the FD to locate the right resource.
+
+**`struct file`** represents one open file (shared when multiple processes open the same file):
+
+- **Current file offset**: Next read/write position.
+- **Access mode & flags**: Read/write/append, O_NONBLOCK, etc.
+- **Pointer to inode**: The underlying file in the filesystem.
+
+**`inode`** holds on-disk metadata — owner, permissions, timestamps, file size, and pointers to data blocks.
+
+**Disk blocks** store the actual file contents. Reading a file involves following inode → block pointers → disk blocks and loading data into memory (often via the page cache).
+
+### 5.5 End-to-End Flow
+
+1. A process runs in **user space** within its virtual address space.
+2. System calls cross the boundary into **kernel space**.
+3. The kernel finds the process via **`task_struct`**.
+4. **`mm_struct`** and **`files_struct`** inside `task_struct` point to the memory and file subsystems.
+5. **Memory path**: VMAs and page tables map virtual addresses to physical RAM (and swap).
+6. **File path**: File descriptors → `struct file` → inode → disk blocks.
+
+This design provides process isolation, shared access to files, and a clear boundary between user and kernel execution.
+
+---
+
 ## Summary
 
 | Component          | Purpose                                           |
