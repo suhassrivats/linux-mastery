@@ -225,10 +225,6 @@ task_struct → files_struct → struct file → inode → page cache → disk
 
 ---
 
-Perfect, Suhas — now we’re diving into **RAID and storage grouping**, which is crucial for **high-availability and performance in Linux storage systems**. I’ll explain this from **concept → Linux implementation → kernel interaction → production relevance**.
-
----
-
 # **1. What is RAID?**
 
 **RAID** = **Redundant Array of Independent/Inexpensive Disks**.
@@ -239,7 +235,7 @@ Purpose:
 2. **Performance** → faster reads/writes
 3. **Capacity aggregation** → multiple disks appear as one
 
-Think of RAID as **a layer that sits above physical disks and presents them as a single logical device**.
+Think of RAID as **a layer that sits above physical disks and presents them as a single logical device**. The key is to see RAID as a layer between the filesystem/block layer and the physical disks.
 
 ---
 
