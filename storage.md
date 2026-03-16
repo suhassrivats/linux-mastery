@@ -404,3 +404,346 @@ md0 : active raid5 sdb[0] sdc[1] sdd[2]
 * md0 → RAID5 logical device
 * [UUU] → all 3 disks healthy
 * Chunk size → 512 KB stripe per disk
+
+---
+
+# Full Flow with commands
+
+```text
+Physical disks → RAID → LVM → Filesystem → Mount
+```
+
+Example disks:
+
+```text
+/dev/sdb
+/dev/sdc
+/dev/sdd
+/dev/sde
+```
+
+---
+
+# 1. Verify Disks Exist
+
+First check available disks.
+
+```bash
+lsblk
+```
+
+Example output:
+
+```text
+sdb   100G
+sdc   100G
+sdd   100G
+sde   100G
+```
+
+Another useful command:
+
+```bash
+fdisk -l
+```
+
+---
+
+# 2. Create RAID Array
+
+Linux software RAID is created using the **mdadm tool**.
+
+Example: create RAID5 from 4 disks.
+
+```bash
+sudo mdadm --create --verbose /dev/md0 \
+  --level=5 \
+  --raid-devices=4 \
+  /dev/sdb /dev/sdc /dev/sdd /dev/sde
+```
+
+Check RAID status:
+
+```bash
+cat /proc/mdstat
+```
+
+Example output:
+
+```text
+md0 : active raid5 sdb[0] sdc[1] sdd[2] sde[3]
+```
+
+Now Linux exposes:
+
+```text
+/dev/md0
+```
+
+This is a **logical RAID disk**.
+
+---
+
+# 3. Create LVM Physical Volume
+
+Now convert the RAID device into an LVM physical volume.
+
+Using **LVM**.
+
+```bash
+sudo pvcreate /dev/md0
+```
+
+Verify:
+
+```bash
+pvs
+```
+
+Output:
+
+```text
+PV        VG   Fmt  Attr
+/dev/md0       lvm2
+```
+
+---
+
+# 4. Create Volume Group
+
+A volume group pools storage.
+
+```bash
+sudo vgcreate vg_data /dev/md0
+```
+
+Check:
+
+```bash
+vgs
+```
+
+Example output:
+
+```text
+VG      #PV  #LV  VSize
+vg_data  1    0   1.5T
+```
+
+---
+
+# 5. Create Logical Volumes
+
+Now split the storage into logical volumes.
+
+Example:
+
+```bash
+sudo lvcreate -L 200G -n lv_logs vg_data
+```
+
+```bash
+sudo lvcreate -L 500G -n lv_db vg_data
+```
+
+```bash
+sudo lvcreate -l 100%FREE -n lv_data vg_data
+```
+
+Check logical volumes:
+
+```bash
+lvs
+```
+
+Example output:
+
+```text
+LV       VG       Size
+lv_logs  vg_data  200G
+lv_db    vg_data  500G
+lv_data  vg_data  800G
+```
+
+Devices created:
+
+```text
+/dev/vg_data/lv_logs
+/dev/vg_data/lv_db
+/dev/vg_data/lv_data
+```
+
+---
+
+# 6. Create Filesystems
+
+Now create filesystems on logical volumes.
+
+Example EXT4:
+
+```bash
+sudo mkfs.ext4 /dev/vg_data/lv_logs
+```
+
+Example XFS:
+
+```bash
+sudo mkfs.xfs /dev/vg_data/lv_db
+```
+
+---
+
+# 7. Create Mount Points
+
+Create directories where filesystems will appear.
+
+```bash
+sudo mkdir /logs
+sudo mkdir /database
+```
+
+---
+
+# 8. Mount the Filesystems
+
+```bash
+sudo mount /dev/vg_data/lv_logs /logs
+```
+
+```bash
+sudo mount /dev/vg_data/lv_db /database
+```
+
+Verify:
+
+```bash
+df -h
+```
+
+Example:
+
+```text
+Filesystem                Size  Mounted on
+/dev/vg_data/lv_logs      200G  /logs
+/dev/vg_data/lv_db        500G  /database
+```
+
+---
+
+# 9. Make Mount Permanent
+
+Edit:
+
+```bash
+sudo vi /etc/fstab
+```
+
+Add entries:
+
+```text
+/dev/vg_data/lv_logs   /logs      ext4   defaults  0 0
+/dev/vg_data/lv_db     /database  xfs    defaults  0 0
+```
+
+---
+
+# 10. Final Storage Stack
+
+Your system now looks like this:
+
+```text
+Applications
+      ↓
+Filesystem (ext4 / xfs)
+      ↓
+Logical Volumes
+/dev/vg_data/lv_logs
+/dev/vg_data/lv_db
+      ↓
+Volume Group
+vg_data
+      ↓
+Physical Volume
+/dev/md0
+      ↓
+RAID5 Array
+      ↓
+Physical Disks
+/dev/sdb /dev/sdc /dev/sdd /dev/sde
+```
+
+---
+
+# 11. Commands to Inspect Each Layer
+
+These are extremely useful in production troubleshooting.
+
+| Layer            | Command                   |
+| ---------------- | ------------------------- |
+| disks            | `lsblk`                   |
+| RAID status      | `cat /proc/mdstat`        |
+| RAID details     | `mdadm --detail /dev/md0` |
+| physical volumes | `pvs`                     |
+| volume groups    | `vgs`                     |
+| logical volumes  | `lvs`                     |
+| filesystems      | `df -h`                   |
+| mounts           | `mount`                   |
+
+---
+
+# 12. Interview Insight
+
+This layered architecture exists because each layer solves a different problem.
+
+| Layer      | Purpose                       |
+| ---------- | ----------------------------- |
+| RAID       | redundancy + performance      |
+| LVM        | flexible storage allocation   |
+| filesystem | file storage structure        |
+| VFS        | unified kernel file interface |
+
+---
+
+✅ **Interview explanation (short version)**
+
+> In Linux, multiple disks can be combined using mdadm to create a RAID array, which appears as a block device like `/dev/md0`. This device is often used as an LVM physical volume, from which volume groups and logical volumes are created. Filesystems such as ext4 or XFS are then created on the logical volumes and mounted to directories for application use.
+
+---
+
+If you'd like, I can also show you **how large distributed storage systems (NetApp, Ceph, Dell EMC) implement the same concepts internally**, which is **very relevant to the “distributed storage systems” requirement in your interview.**
+
+
+
+```
+Physical disks
+/dev/sda
+/dev/sdb
+/dev/sdc
+/dev/sdd
+        ↓
+RAID5 array
+        ↓
+/dev/md0
+        ↓
+LVM Physical Volume
+        ↓
+Volume Group
+        ↓
+Logical Volumes
+/dev/vg_data/lv_logs
+/dev/vg_data/lv_db
+        ↓
+Filesystem
+XFS / EXT4
+        ↓
+Mounted directories
+/logs
+/db
+```
+
+Applications interact with:
+
+```
+/logs
+/db
+```
