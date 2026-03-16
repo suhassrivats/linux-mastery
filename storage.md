@@ -704,15 +704,9 @@ This layered architecture exists because each layer solves a different problem.
 
 ---
 
-✅ **Interview explanation (short version)**
+**Summary (short version)**
 
 > In Linux, multiple disks can be combined using mdadm to create a RAID array, which appears as a block device like `/dev/md0`. This device is often used as an LVM physical volume, from which volume groups and logical volumes are created. Filesystems such as ext4 or XFS are then created on the logical volumes and mounted to directories for application use.
-
----
-
-If you'd like, I can also show you **how large distributed storage systems (NetApp, Ceph, Dell EMC) implement the same concepts internally**, which is **very relevant to the “distributed storage systems” requirement in your interview.**
-
-
 
 ```
 Physical disks
